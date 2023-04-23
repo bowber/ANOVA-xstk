@@ -1,0 +1,142 @@
+# Giới thiệu đề tài
+
+**Đây là hoạt động 2 của đề tài 4, với chủ đề phân tích ANOVA cho tập dữ liệu về hoạt động bán lẻ.**
+
+Tập dữ liệu [này](https://archive.ics.uci.edu/ml/datasets/Online+Retail+II) chứa tất cả các giao dịch xảy ra cho một cửa hàng bán lẻ trực tuyến từ 01/12/2009 đến 09/12/2011, có trụ sở tại Vương quốc Anh.
+
+**Đề tài này sẽ phân tích khả năng mua lại của khách hàng đối với từng phân khúc giá (vì có quá nhiều món hàng nên phải chia phân khúc)**
+
+Phần này sẽ được bổ sung chi tiết sau
+
+# Code
+
+## Import thư viện
+
+```{r}
+library(ggplot2)
+```
+
+## Đọc data
+
+```{r}
+data = read.csv("./data/online_retail_II.csv")
+```
+
+## Xử lý dữ liệu
+
+### Chuyển kiểu dữ liệu:
+
+```{r}
+data$Invoice = factor(data$Invoice)
+data$StockCode = factor(data$StockCode)
+data$InvoiceDate = as.POSIXct(data$InvoiceDate, format = "%d/%m/%Y %H:%M")
+data$Customer.ID = factor(data$Customer.ID)
+data$Country = factor(data$Country)
+
+summary(data)
+```
+
+### Chỉ lấy những columns cần thiết
+
+```{r}
+data = subset(data, select = c(StockCode, Invoice, Customer.ID, Quantity, Price))
+```
+
+### Xóa những đơn hàng bị hủy và thiếu thông tin
+
+```{r}
+# Đơn thiếu thông tin 
+data = na.omit(data)
+
+# Đơn bị hủy có Invoice bắt đầu bằng "C"
+data = data[!startsWith(as.character(data$Invoice), "C"),]
+
+summary(data)
+```
+
+### Chia hàng hóa làm 5 nhóm theo giá tiền (dựa vào số liệu summary ở trên)
+
+```{r}
+filter_func = function(price) {
+  if (price < 1) {
+    return("VERY LOW")
+  }
+  if (price < 2) {
+    return("LOW")
+  }
+  if (price < 3) {
+    return("MEDIUM")
+  }
+  if (price < 4) {
+    return("HIGH")
+  }
+  return("VERY HIGH")
+}
+
+data$PriceCategory = lapply(data$Price, FUN=filter_func)
+data$PriceCategory = unlist(data$PriceCategory)
+data$PriceCategory = factor(data$PriceCategory)
+summary(data$PriceCategory)
+```
+
+### Tính toán số lần mua lại của khách hàng với mỗi nhóm hàng hóa
+
+> *Số lần mua lại được tính bằng số lần mua hàng trừ đi 1*
+
+```{r}
+# Số lần mua hàng:
+# Đáng ra phải tính số lần mua hàng theo theo Invoice nhưng mỗi Invoice chắc chắn không lặp lại StockCode nên có thể tính theo số lần xuất hiện.
+freq_df = data.frame(table(data$PriceCategory, data$Customer.ID))
+colnames(freq_df) = c("PriceCategory", "Customer.ID", "Freq")
+# Bỏ những món không được mua lại (Fred < 2) để tính nhanh hơn
+freq_df = freq_df[freq_df$Freq >= 2,]
+freq_df$repurchase =  freq_df$Freq - 1
+# Loại bỏ outliers
+Q1= quantile(freq_df$repurchase, .25)
+Q3 = quantile(freq_df$repurchase, .75)
+IQR = IQR(freq_df$repurchase)
+new_freq_df = subset(freq_df, freq_df$repurchase> (Q1 - 1.5*IQR) & freq_df$repurchase< (Q3 + 1.5*IQR))
+```
+
+## Mô tả tổng thể dữ liệu
+
+```{r}
+head(data)
+```
+
+### Số lượng giao dịch theo món hàng
+
+```{r}
+tab = table(data$StockCode)
+tab_ordered = tab[order(tab, decreasing = TRUE)]
+barplot(tab_ordered)
+boxplot(data$StockCode)
+```
+
+### Số lượng giao dịch theo khách hàng
+
+```{r}
+tab = table(data$Customer.ID)
+tab_ordered = tab[order(tab, decreasing = TRUE)]
+barplot(tab_ordered)
+boxplot(data$Customer.ID)
+```
+
+### Box plot
+
+```{r}
+ggplot(new_freq_df, aes(PriceCategory, repurchase),)+geom_boxplot(aes(fill=PriceCategory))
+```
+
+### ANOVA
+
+```{r}
+anv = aov(repurchase ~ PriceCategory, new_freq_df)
+summary(anv)
+```
+
+## Kiểm tra giả định
+
+```{r}
+plot(anv)
+```
